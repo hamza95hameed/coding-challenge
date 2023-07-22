@@ -18,4 +18,9 @@ class Connection extends Model
     {
         return $this->belongsTo(User::class, 'connected_user_id');
     }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }

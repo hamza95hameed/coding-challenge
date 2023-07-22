@@ -20,11 +20,11 @@ class DatabaseSeeder extends Seeder
     {
 
 
-        foreach(range(1,10) as $item)
+        foreach(range(1,20) as $item)
         {
             DB::table('users')->insert([
-                'name' => Str::random(10),
-                'email' => Str::random(10).'@gmail.com',
+                'name' => 'User'. $item,
+                'email' => 'user'. $item. '@gmail.com',
                 'password' => Hash::make('password'),
                 'email_verified_at' => now(),
             ]);

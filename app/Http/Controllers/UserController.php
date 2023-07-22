@@ -17,8 +17,12 @@ class UserController extends Controller
     {
         $loggedInUserId = auth()->user()->id;
         $users = User::where('id', '!=', $loggedInUserId)
-            ->whereDoesntHave('connections')
-            ->whereDoesntHave('receivedConnections')
+            ->whereDoesntHave('connections', function ($query) use ($loggedInUserId) {
+                $query->where('connected_user_id', $loggedInUserId);
+            })
+            ->whereDoesntHave('receivedConnections', function ($query) use ($loggedInUserId) {
+                $query->where('user_id', $loggedInUserId);
+            })
             ->get();
         return $users;
     }
@@ -44,7 +48,7 @@ class UserController extends Controller
         $user = auth()->user()->id;
         $connection = Connection::create([
             'user_id' => $user,
-            'connected_user_id' => $request->connectedUserId,
+            'connected_user_id' => $request->connectionId,
             'status' => 0
         ]);
 
@@ -111,8 +115,6 @@ class UserController extends Controller
             'password' => bcrypt($request->password),
         ]);
 
-        $user->roles()->attach(2); // Simple user role
-
         return response()->json($user);
     }
 
@@ -143,6 +145,12 @@ class UserController extends Controller
         ]);
     }
 
+    public function logout(Request $request){
+        $user = auth()->user()->id;
+        $user->tokens()->delete();
+        return true;
+    }
+
     public function sentConnectionRequest(){
         try {
             $loggedInUserId = auth()->user()->id;
@@ -158,10 +166,119 @@ class UserController extends Controller
     public function withdrawConnectionRequest(Request $request){
         try {
             $loggedInUserId = auth()->user()->id;
-            $user = User::find($loggedInUserId);
-            $withdrawConnection = $user->connections()->where('connected_user_id', $request->connected_user_id)->delete();
+            $user           = User::find($loggedInUserId);
+            $connection     = $user->connections()
+                                ->where('connected_user_id', $request->connectionId)
+                                ->where('status', 0)
+                                ->delete();
+            return $connection;
+        } catch (\Throwable $th) {
+            //throw $th;
+        }
+    }
 
-            return $withdrawConnection;
+    public function receivedConnectionRequest(){
+        try {
+            $loggedInUserId      = auth()->user()->id;
+            $user                = User::find($loggedInUserId);
+            $receivedConnections = $user->receivedConnections()->where('status', 0)->get();
+            return $receivedConnections->load('user');
+        } catch (\Throwable $th) {
+            //throw $th;
+        }
+    }
+
+    public function acceptConnectionRequest(Request $request){
+        try {
+            $loggedInUserId = auth()->user()->id;
+            $user           = User::find($loggedInUserId);
+            $connection     = $user->receivedConnections()->where('user_id', $request->connectionId)->first();
+            $connection->update(['status' => 1]);
+            return $connection;
+        } catch (\Throwable $th) {
+            //throw $th;
+        }
+    }
+
+    public function getConnectedConnections(Request $request){
+        try {
+            $loggedInUserId = auth()->user()->id;
+            $connectedUsers = User::whereHas('receivedConnections', function ($query) use ($loggedInUserId) {
+                $query->where('user_id', $loggedInUserId)->where('status', 1);
+            })
+            ->orWhereHas('connections', function ($query) use ($loggedInUserId) {
+                $query->where('connected_user_id', $loggedInUserId)->where('status', 1);
+            })
+            ->get();
+            return $connectedUsers;
+        } catch (\Throwable $th) {
+            //throw $th;
+        }
+    }
+
+    public function removeConnectionRequest(Request $request){
+        try {
+            $loggedInUserId = auth()->user()->id;
+            $connectedUsers = Connection::where(function ($query) use ($loggedInUserId, $request) {
+                $query->where('user_id', $loggedInUserId)
+                    ->where('connected_user_id', $request->connectionId);
+            })
+            ->orWhere(function ($query) use ($loggedInUserId, $request) {
+                $query->where('user_id', $request->connectionId)
+                    ->where('connected_user_id', $loggedInUserId);
+            })->first();
+
+            $connectedUsers->delete();
+            
+            return $connectedUsers;
+        } catch (\Throwable $th) {
+            //throw $th;
+        }
+    }
+
+    public function getCount(){
+        try {
+            $loggedInUserId = auth()->user()->id;
+
+            // Count suggested users
+            $suggestedUsersCount = User::where('id', '!=', $loggedInUserId)
+                ->whereDoesntHave('connections', function ($query) use ($loggedInUserId) {
+                    $query->where('connected_user_id', $loggedInUserId);
+                })
+                ->whereDoesntHave('receivedConnections', function ($query) use ($loggedInUserId) {
+                    $query->where('user_id', $loggedInUserId);
+                })
+                ->count();
+
+            // Count sent connections
+            $sentConnectionsCount = User::find($loggedInUserId)
+                ->connections()
+                ->where('status', 0)
+                ->count();
+
+            // Count received connections
+            $receivedConnectionsCount = User::find($loggedInUserId)
+                ->receivedConnections()
+                ->where('status', 0)
+                ->count();
+
+            // Count connected users
+            $connectedUsersCount = User::whereHas('receivedConnections', function ($query) use ($loggedInUserId) {
+                $query->where('user_id', $loggedInUserId)->where('status', 1);
+            })
+            ->orWhereHas('connections', function ($query) use ($loggedInUserId) {
+                $query->where('connected_user_id', $loggedInUserId)->where('status', 1);
+            })
+            ->count();
+
+            $data = [
+                'suggestedUsersCount'      => $suggestedUsersCount,
+                'sentConnectionsCount'     => $sentConnectionsCount,
+                'receivedConnectionsCount' => $receivedConnectionsCount,
+                'connectedUsersCount'      => $connectedUsersCount                
+            ];
+
+            return $data;
         } catch (\Throwable $th) {
             //throw $th;
         }
